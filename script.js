@@ -10,8 +10,6 @@
   const scoreEl = document.getElementById('score');
   const muteBtn = document.getElementById('mute-btn');
   const musicVolumeSlider = document.getElementById('music-volume');
-  const audioDebugEl = document.getElementById('audio-debug');
-  const testSoundBtn = document.getElementById('test-sound-btn');
 
   const W = canvas.width;
   const H = canvas.height;
@@ -86,19 +84,12 @@
     let musicVolume = 0.27;
     const SFX_VOLUME = 0.35;
 
-    let lastError = null;
-    let lastAction = 'not started';
-
     function ensureContext() {
       try {
         if (!ctx) {
           const AudioCtx = window.AudioContext || window.webkitAudioContext;
-          if (!AudioCtx) {
-            lastAction = 'no AudioContext support';
-            return null;
-          }
+          if (!AudioCtx) return null;
           ctx = new AudioCtx();
-          lastAction = `created (state=${ctx.state})`;
           musicGain = ctx.createGain();
           musicGain.gain.value = muted ? 0 : musicVolume;
           musicGain.connect(ctx.destination);
@@ -119,36 +110,13 @@
         // taking the audio session). resume() is what recovers from it too,
         // but a check for only "suspended" misses it and gets stuck forever.
         if (ctx.state !== 'running' && ctx.state !== 'closed') {
-          lastAction = `resume() requested (was ${ctx.state})`;
-          ctx.resume().then(
-            () => {
-              lastAction = `resume() resolved (state=${ctx.state})`;
-              lastError = null;
-            },
-            (err) => {
-              lastAction = 'resume() rejected';
-              lastError = String(err);
-            }
-          );
-        } else {
-          lastAction = `ready (state=${ctx.state})`;
+          ctx.resume().catch(() => {});
         }
         return ctx;
       } catch (err) {
-        lastAction = 'threw exception';
-        lastError = String(err);
         console.error('AudioEngine: failed to init/resume AudioContext', err);
         return ctx;
       }
-    }
-
-    // Human-readable snapshot for the on-screen debug readout — lets us see
-    // what's actually happening on a phone without a devtools connection.
-    function getDebugInfo() {
-      if (!ctx) return `no context yet (${lastAction})`;
-      let info = `state=${ctx.state} | ${lastAction}`;
-      if (lastError) info += ` | error: ${lastError}`;
-      return info;
     }
 
     // Mobile browsers often suspend (or, on WebKit, "interrupt") the
@@ -318,7 +286,6 @@
       // the AudioContext immediately, before any game-ready gating applies.
       unlock: ensureContext,
       isUnlocked,
-      getDebugInfo,
     };
   })();
 
@@ -713,41 +680,9 @@
     AudioEngine.setMusicVolumePercent(Number(e.target.value));
   });
 
-  // Isolation test: bypasses every bit of our music/SFX code and gain
-  // routing, and just plays the loudest, simplest possible tone straight to
-  // the speaker. If this is also silent, the problem is outside our JS
-  // entirely (device audio routing, a muted tab, Bluetooth output, etc.) —
-  // if this works, the bug is specifically in our music/SFX code.
-  testSoundBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    testSoundBtn.textContent = '🔊 Playing...';
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      const testCtx = new AudioCtx();
-      testCtx.resume().catch(() => {});
-      const osc = testCtx.createOscillator();
-      osc.type = 'square';
-      osc.frequency.value = 440;
-      osc.connect(testCtx.destination);
-      osc.start();
-      osc.stop(testCtx.currentTime + 1);
-      osc.onended = () => {
-        testSoundBtn.textContent = `🔊 Test Sound (state was: ${testCtx.state})`;
-      };
-    } catch (err) {
-      testSoundBtn.textContent = `Error: ${err}`;
-    }
-  });
-
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) AudioEngine.resumeIfNeeded();
   });
-
-  // Temporary on-screen readout of the AudioContext's real status — lets us
-  // see what's happening on a phone that isn't hooked up to devtools.
-  setInterval(() => {
-    audioDebugEl.textContent = `Audio: ${AudioEngine.getDebugInfo()}`;
-  }, 300);
 
   // iOS/Safari only unlocks Web Audio inside a genuine user gesture, and the
   // very first tap can arrive before assets finish loading (when flap() is
