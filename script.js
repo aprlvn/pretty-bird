@@ -1,6 +1,7 @@
 (() => {
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
+  const gameContainer = document.getElementById('game-container');
   const overlay = document.getElementById('overlay');
   const title = document.getElementById('title');
   const message = document.getElementById('message');
@@ -10,6 +11,7 @@
   const muteBtn = document.getElementById('mute-btn');
   const musicVolumeSlider = document.getElementById('music-volume');
   const audioDebugEl = document.getElementById('audio-debug');
+  const testSoundBtn = document.getElementById('test-sound-btn');
 
   const W = canvas.width;
   const H = canvas.height;
@@ -38,7 +40,7 @@
   const BASE_MOVING_CHANCE = 0.35;
   const MAX_MOVING_CHANCE = 0.75;
   const CHANCE_PER_LEVEL = 0.04;
-  const CHILL_TO_THRILL_SCORE = 10;
+  const CHILL_TO_THRILL_SCORE = 24;
 
   const STEP_OFFSET_MIN = 35;
   const STEP_OFFSET_MAX = 80;
@@ -664,6 +666,33 @@
     flap();
   }
 
+  const MOBILE_QUERY = window.matchMedia('(max-width: 768px)');
+
+  // On mobile, scale #game-container (in real px, not just CSS max-width) so
+  // it covers the entire viewport at the game's native 480:640 ratio —
+  // cropping whichever axis overflows rather than leaving letterbox bars or
+  // stretching the canvas out of proportion. Desktop keeps the CSS-driven
+  // centered card and gets its inline sizing cleared.
+  function fitGameContainer() {
+    if (!MOBILE_QUERY.matches) {
+      gameContainer.style.width = '';
+      gameContainer.style.height = '';
+      return;
+    }
+    const viewportWidth = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+    const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    const scale = Math.max(viewportWidth / W, viewportHeight / H);
+    gameContainer.style.width = `${W * scale}px`;
+    gameContainer.style.height = `${H * scale}px`;
+  }
+
+  fitGameContainer();
+  window.addEventListener('resize', fitGameContainer);
+  window.addEventListener('orientationchange', fitGameContainer);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', fitGameContainer);
+  }
+
   window.addEventListener('keydown', handleInput);
   canvas.addEventListener('mousedown', flap);
   canvas.addEventListener('touchstart', (e) => {
@@ -682,6 +711,32 @@
   AudioEngine.setMusicVolumePercent(Number(musicVolumeSlider.value));
   musicVolumeSlider.addEventListener('input', (e) => {
     AudioEngine.setMusicVolumePercent(Number(e.target.value));
+  });
+
+  // Isolation test: bypasses every bit of our music/SFX code and gain
+  // routing, and just plays the loudest, simplest possible tone straight to
+  // the speaker. If this is also silent, the problem is outside our JS
+  // entirely (device audio routing, a muted tab, Bluetooth output, etc.) —
+  // if this works, the bug is specifically in our music/SFX code.
+  testSoundBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    testSoundBtn.textContent = '🔊 Playing...';
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const testCtx = new AudioCtx();
+      testCtx.resume().catch(() => {});
+      const osc = testCtx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.value = 440;
+      osc.connect(testCtx.destination);
+      osc.start();
+      osc.stop(testCtx.currentTime + 1);
+      osc.onended = () => {
+        testSoundBtn.textContent = `🔊 Test Sound (state was: ${testCtx.state})`;
+      };
+    } catch (err) {
+      testSoundBtn.textContent = `Error: ${err}`;
+    }
   });
 
   document.addEventListener('visibilitychange', () => {
