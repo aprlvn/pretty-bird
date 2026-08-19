@@ -164,3 +164,25 @@ canvas#game {
   accent-color: #ffd23f;
   touch-action: manipulation;
 }
+
+#audio-debug {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  right: 6px;
+  max-width: calc(100% - 12px);
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #7CFC98;
+  font-family: monospace;
+  font-size: 10px;
+  line-height: 1.3;
+  border-radius: 6px;
+  pointer-events: none;
+  word-break: break-word;
+  z-index: 50;
+}
+
+#audio-debug:empty {
+  display: none;
+}

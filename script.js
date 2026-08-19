@@ -9,6 +9,7 @@
   const scoreEl = document.getElementById('score');
   const muteBtn = document.getElementById('mute-btn');
   const musicVolumeSlider = document.getElementById('music-volume');
+  const audioDebugEl = document.getElementById('audio-debug');
 
   const W = canvas.width;
   const H = canvas.height;
@@ -83,34 +84,77 @@
     let musicVolume = 0.27;
     const SFX_VOLUME = 0.35;
 
-    function ensureContext() {
-      if (!ctx) {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return null;
-        ctx = new AudioCtx();
-        musicGain = ctx.createGain();
-        musicGain.gain.value = muted ? 0 : musicVolume;
-        musicGain.connect(ctx.destination);
-        sfxGain = ctx.createGain();
-        sfxGain.gain.value = muted ? 0 : SFX_VOLUME;
-        sfxGain.connect(ctx.destination);
+    let lastError = null;
+    let lastAction = 'not started';
 
-        // iOS/Safari only fully unlocks audio after a real sound plays inside
-        // the gesture handler that created the context — a silent blip does it.
-        const unlockBuffer = ctx.createBuffer(1, 1, 22050);
-        const unlockSource = ctx.createBufferSource();
-        unlockSource.buffer = unlockBuffer;
-        unlockSource.connect(ctx.destination);
-        unlockSource.start(0);
+    function ensureContext() {
+      try {
+        if (!ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (!AudioCtx) {
+            lastAction = 'no AudioContext support';
+            return null;
+          }
+          ctx = new AudioCtx();
+          lastAction = `created (state=${ctx.state})`;
+          musicGain = ctx.createGain();
+          musicGain.gain.value = muted ? 0 : musicVolume;
+          musicGain.connect(ctx.destination);
+          sfxGain = ctx.createGain();
+          sfxGain.gain.value = muted ? 0 : SFX_VOLUME;
+          sfxGain.connect(ctx.destination);
+
+          // iOS/Safari only fully unlocks audio after a real sound plays inside
+          // the gesture handler that created the context — a silent blip does it.
+          const unlockBuffer = ctx.createBuffer(1, 1, 22050);
+          const unlockSource = ctx.createBufferSource();
+          unlockSource.buffer = unlockBuffer;
+          unlockSource.connect(ctx.destination);
+          unlockSource.start(0);
+        }
+        if (ctx.state === 'suspended') {
+          lastAction = 'resume() requested';
+          ctx.resume().then(
+            () => {
+              lastAction = `resume() resolved (state=${ctx.state})`;
+              lastError = null;
+            },
+            (err) => {
+              lastAction = 'resume() rejected';
+              lastError = String(err);
+            }
+          );
+        } else {
+          lastAction = `ready (state=${ctx.state})`;
+        }
+        return ctx;
+      } catch (err) {
+        lastAction = 'threw exception';
+        lastError = String(err);
+        console.error('AudioEngine: failed to init/resume AudioContext', err);
+        return ctx;
       }
-      if (ctx.state === 'suspended') ctx.resume();
-      return ctx;
+    }
+
+    // Human-readable snapshot for the on-screen debug readout — lets us see
+    // what's actually happening on a phone without a devtools connection.
+    function getDebugInfo() {
+      if (!ctx) return `no context yet (${lastAction})`;
+      let info = `state=${ctx.state} | ${lastAction}`;
+      if (lastError) info += ` | error: ${lastError}`;
+      return info;
     }
 
     // Mobile browsers often suspend the AudioContext when the tab/app is
     // backgrounded; resume it once the player comes back.
     function resumeIfNeeded() {
-      if (ctx && ctx.state === 'suspended') ctx.resume();
+      if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+    }
+
+    // True once the AudioContext exists and is actually running — iOS/Safari
+    // create it in a "suspended" state until a real gesture resumes it.
+    function isUnlocked() {
+      return !!ctx && ctx.state === 'running';
     }
 
     function playTone({ freqStart, freqEnd, duration, type = 'sine', gainStart = 0.3, delay = 0 }) {
@@ -263,6 +307,11 @@
       toggleMuted,
       resumeIfNeeded,
       isMuted: () => muted,
+      // Exposed so the very first tap anywhere on the page can create/resume
+      // the AudioContext immediately, before any game-ready gating applies.
+      unlock: ensureContext,
+      isUnlocked,
+      getDebugInfo,
     };
   })();
 
@@ -633,6 +682,28 @@
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) AudioEngine.resumeIfNeeded();
   });
+
+  // Temporary on-screen readout of the AudioContext's real status — lets us
+  // see what's happening on a phone that isn't hooked up to devtools.
+  setInterval(() => {
+    audioDebugEl.textContent = `Audio: ${AudioEngine.getDebugInfo()}`;
+  }, 300);
+
+  // iOS/Safari only unlocks Web Audio inside a genuine user gesture, and the
+  // very first tap can arrive before assets finish loading (when flap() is
+  // still a no-op). This listens for that literal first tap/click/key press
+  // anywhere on the page — independent of game state — creates and resumes
+  // the AudioContext right then, and keeps retrying on each gesture until
+  // the context reports "running" (some iOS versions resolve resume()
+  // asynchronously, so one tap isn't always guaranteed to finish the job).
+  const UNLOCK_EVENTS = ['touchstart', 'touchend', 'pointerdown', 'mousedown', 'click', 'keydown'];
+  function unlockAudioOnGesture() {
+    AudioEngine.unlock();
+    if (AudioEngine.isUnlocked()) {
+      UNLOCK_EVENTS.forEach((type) => document.removeEventListener(type, unlockAudioOnGesture));
+    }
+  }
+  UNLOCK_EVENTS.forEach((type) => document.addEventListener(type, unlockAudioOnGesture, { passive: true }));
 
   title.textContent = 'Pretty Bird';
   message.textContent = 'Loading...';
