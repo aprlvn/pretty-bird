@@ -112,8 +112,12 @@
           unlockSource.connect(ctx.destination);
           unlockSource.start(0);
         }
-        if (ctx.state === 'suspended') {
-          lastAction = 'resume() requested';
+        // Safari/iOS WebKit adds a state beyond the spec's suspended/running/
+        // closed: "interrupted" (e.g. after a call, Siri, or another app
+        // taking the audio session). resume() is what recovers from it too,
+        // but a check for only "suspended" misses it and gets stuck forever.
+        if (ctx.state !== 'running' && ctx.state !== 'closed') {
+          lastAction = `resume() requested (was ${ctx.state})`;
           ctx.resume().then(
             () => {
               lastAction = `resume() resolved (state=${ctx.state})`;
@@ -145,10 +149,11 @@
       return info;
     }
 
-    // Mobile browsers often suspend the AudioContext when the tab/app is
-    // backgrounded; resume it once the player comes back.
+    // Mobile browsers often suspend (or, on WebKit, "interrupt") the
+    // AudioContext when the tab/app is backgrounded; resume it once the
+    // player comes back.
     function resumeIfNeeded() {
-      if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+      if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {});
     }
 
     // True once the AudioContext exists and is actually running — iOS/Safari
