@@ -2,125 +2,32 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wordle Land — A Pink Word Game</title>
-<link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="favicon-16.png" sizes="16x16" type="image/png">
-<link rel="icon" href="favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Pretty Bird</title>
+<link rel="icon" type="image/png" href="images/favicon.png?v=2">
+<link rel="apple-touch-icon" href="images/favicon.png?v=2">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="bg-blob blob-1"></div>
-  <div class="bg-blob blob-2"></div>
-  <div class="bg-blob blob-3"></div>
-
-  <header class="header">
-    <div class="header-left">
-      <button id="help-btn" class="icon-btn" title="How to play" aria-label="How to play">?</button>
-      <div class="timer-badge" aria-label="Elapsed time">
-        <span class="timer-icon">⏱️</span>
-        <span id="timer" class="timer-value">00:00</span>
-      </div>
+  <div id="game-container">
+    <canvas id="game" width="480" height="640"></canvas>
+    <div id="overlay">
+      <h1 id="title">Pretty Bird</h1>
+      <p id="message">Tap, click, or press Space to flap</p>
+      <p id="score-display"></p>
+      <button id="start-btn">Play</button>
     </div>
-    <div class="title-wrap">
-      <h1 class="title">Wordle Land</h1>
-      <p class="subtitle">Guess the word, one bloom at a time 🌸</p>
+    <div id="hud">
+      <span id="score">0</span>
     </div>
-    <div class="header-actions">
-      <button id="sound-btn" class="icon-btn" title="Toggle sound" aria-label="Toggle sound">🔊</button>
-      <button id="new-game-btn" class="icon-btn" title="New game" aria-label="New game">⟳</button>
-    </div>
-  </header>
-
-  <div id="toast-container" class="toast-container"></div>
-
-  <main class="game">
-    <div id="board" class="board" aria-label="Game board"></div>
-
-    <div class="action-row">
-      <button id="hint-btn" class="action-btn hint">💡 Hint</button>
-      <button id="giveup-btn" class="action-btn giveup">🏳️ Give Up</button>
-    </div>
-
-    <div id="hint-box" class="hint-box hidden">
-      <button class="hint-close" id="close-hint" aria-label="Close hint">&times;</button>
-      <span id="hint-text"></span>
-    </div>
-
-    <div id="keyboard" class="keyboard" aria-label="Keyboard"></div>
-  </main>
-
-  <div id="help-modal" class="modal hidden">
-    <div class="modal-content">
-      <button class="modal-close" id="close-help" aria-label="Close">&times;</button>
-      <h2>How to Play</h2>
-      <p>Guess the hidden word in 6 tries.</p>
-      <p>Each guess must be a valid 5-letter word. Hit enter to submit.</p>
-      <p>After each guess, the color of the tiles will change to show how close your guess was.</p>
-      <div class="example">
-        <div class="tile-row">
-          <div class="tile correct">P</div>
-          <div class="tile">I</div>
-          <div class="tile">N</div>
-          <div class="tile">K</div>
-          <div class="tile">Y</div>
-        </div>
-        <p><strong>P</strong> is in the word and in the correct spot.</p>
-      </div>
-      <div class="example">
-        <div class="tile-row">
-          <div class="tile">B</div>
-          <div class="tile">L</div>
-          <div class="tile present">U</div>
-          <div class="tile">S</div>
-          <div class="tile">H</div>
-        </div>
-        <p><strong>U</strong> is in the word but in the wrong spot.</p>
-      </div>
-      <div class="example">
-        <div class="tile-row">
-          <div class="tile">R</div>
-          <div class="tile">O</div>
-          <div class="tile">S</div>
-          <div class="tile absent">E</div>
-          <div class="tile">S</div>
-        </div>
-        <p><strong>E</strong> is not in the word in any spot.</p>
-      </div>
+    <div id="audio-controls">
+      <button id="mute-btn" aria-label="Toggle sound" title="Toggle sound">🔊</button>
+      <input type="range" id="music-volume" min="0" max="100" value="45" step="1" aria-label="Music volume">
     </div>
   </div>
-
-  <div id="end-modal" class="modal hidden">
-    <div class="modal-content">
-      <button class="modal-close" id="close-end" aria-label="Close">&times;</button>
-      <h2 id="end-title">You Win!</h2>
-      <p id="end-message"></p>
-      <div id="end-definition" class="definition-box hidden">
-        <p class="definition-label">📖 Word of the round</p>
-        <p id="definition-word" class="definition-word"></p>
-        <p id="definition-text" class="definition-text"></p>
-        <p id="definition-example" class="definition-example hidden"></p>
-        <p id="definition-related" class="definition-related hidden"></p>
-      </div>
-      <button id="play-again-btn" class="primary-btn">Play Again</button>
-    </div>
-  </div>
-
-  <div id="giveup-modal" class="modal hidden">
-    <div class="modal-content">
-      <button class="modal-close" id="close-giveup" aria-label="Close">&times;</button>
-      <h2>Give Up?</h2>
-      <p>This will end the round and reveal the word. Are you sure?</p>
-      <div class="confirm-actions">
-        <button id="confirm-giveup-btn" class="primary-btn danger">Yes, reveal it</button>
-        <button id="cancel-giveup-btn" class="secondary-btn">Keep guessing</button>
-      </div>
-    </div>
-  </div>
-
-  <script src="words.js"></script>
-  <script src="script.js"></script>
+<script src="script.js"></script>
 </body>
 </html>
