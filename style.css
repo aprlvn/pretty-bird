@@ -710,31 +710,16 @@ body {
   font-weight: 700;
 }
 
+/* Mobile only (web/desktop above 600px is untouched). Sized so the board,
+   Hint/Give Up row, and full keyboard all fit within a typical phone's
+   visible viewport without scrolling. */
 @media (max-width: 600px) {
-  .board {
-    gap: 5px;
-    width: min(220px, 65vw);
-  }
-  .board-row {
-    gap: 5px;
-  }
-  .tile {
-    font-size: 1.15rem;
-    border-radius: 7px;
-  }
-}
-
-@media (max-width: 400px) {
   .title {
     font-size: 1.35rem;
     letter-spacing: 0.04rem;
   }
   .subtitle {
     font-size: 0.62rem;
-  }
-  .key {
-    height: 46px;
-    font-size: 0.8rem;
   }
   .icon-btn {
     width: 34px;
@@ -745,8 +730,35 @@ body {
     padding: 4px 8px;
     font-size: 0.72rem;
   }
+
+  .game {
+    gap: 12px;
+    padding: 12px 14px 16px;
+  }
+
+  .board {
+    gap: 4px;
+    width: min(190px, 58vw);
+  }
+  .board-row {
+    gap: 4px;
+  }
+  .tile {
+    font-size: 1rem;
+    border-radius: 6px;
+  }
+
   .action-btn {
-    font-size: 0.72rem;
-    padding: 7px 6px;
+    font-size: 0.9rem;
+    padding: 9px 8px;
+  }
+
+  .keyboard {
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .key {
+    height: 44px;
+    font-size: 0.85rem;
   }
 }
