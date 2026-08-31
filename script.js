@@ -1,706 +1,650 @@
-(() => {
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
-  const gameContainer = document.getElementById('game-container');
-  const overlay = document.getElementById('overlay');
-  const title = document.getElementById('title');
-  const message = document.getElementById('message');
-  const scoreDisplay = document.getElementById('score-display');
-  const startBtn = document.getElementById('start-btn');
-  const scoreEl = document.getElementById('score');
-  const muteBtn = document.getElementById('mute-btn');
-  const musicVolumeSlider = document.getElementById('music-volume');
+(function () {
+  const WORD_LENGTH = 5;
+  const MAX_GUESSES = 6;
 
-  const W = canvas.width;
-  const H = canvas.height;
-
-  const GRAVITY = 1500;
-  const FLAP_VELOCITY = -420;
-  const PIPE_WIDTH = 80;
-  const GROUND_HEIGHT = 0;
-  const BIRD_WIDTH = 50;
-  const BIRD_HEIGHT = 40;
-  const FLAP_FRAME_MS = 140;
-  const POP_DURATION = 180;
-  const POP_SCALE = 1.35;
-
-  // Base difficulty, ramped up over time by score (see getDifficultyLevel).
-  const DIFFICULTY_SCORE_STEP = 5;
-  const BASE_PIPE_SPEED = 160;
-  const MAX_PIPE_SPEED = 300;
-  const SPEED_PER_LEVEL = 10;
-  const BASE_PIPE_GAP = 160;
-  const MIN_PIPE_GAP = 120;
-  const GAP_PER_LEVEL = 4;
-  const BASE_PIPE_INTERVAL = 1400;
-  const MIN_PIPE_INTERVAL = 950;
-  const INTERVAL_PER_LEVEL = 35;
-  const BASE_MOVING_CHANCE = 0.35;
-  const MAX_MOVING_CHANCE = 0.75;
-  const CHANCE_PER_LEVEL = 0.04;
-  const CHILL_TO_THRILL_SCORE = 24;
-
-  const STEP_OFFSET_MIN = 35;
-  const STEP_OFFSET_MAX = 80;
-  const STEP_COUNT_MIN = 2;
-  const STEP_COUNT_MAX = 5;
-  const STEP_ZONE_START_X = 420;
-  const STEP_ZONE_END_X = 150;
-
-  const CLOUDS = [
-    { x: 40, y: 70, scale: 1.0, speed: 9 },
-    { x: 220, y: 42, scale: 0.7, speed: 6 },
-    { x: 350, y: 115, scale: 1.3, speed: 13 },
-    { x: 130, y: 160, scale: 0.55, speed: 4 },
+  const KEYBOARD_ROWS = [
+    ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+    ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
+    ["ENTER", "Z", "X", "C", "V", "B", "N", "M", "BACK"],
   ];
 
-  // Eye socket positions measured from each cat sprite (source pixel space),
-  // used to paint over the sprite's fixed pupil with a pupil that tracks the bird.
-  const CAT_DEFS = [
-    { key: 'cat1', sclera: '#fdfcfb', eyeL: { x: 25, y: 49, r: 5.5 }, eyeR: { x: 55, y: 49, r: 5.5 } },
-    { key: 'cat2', sclera: '#e9c76e', eyeL: { x: 25, y: 49, r: 6.5 }, eyeR: { x: 51, y: 48, r: 6 } },
-    { key: 'cat3', sclera: '#e9e5e2', eyeL: { x: 27, y: 42, r: 4.5 }, eyeR: { x: 55, y: 41, r: 4 } },
-    { key: 'cat4', sclera: '#ffffff', eyeL: { x: 29, y: 32, r: 3.5 }, eyeR: { x: 49, y: 32, r: 3.5 } },
-  ];
+  const boardEl = document.getElementById("board");
+  const keyboardEl = document.getElementById("keyboard");
+  const toastContainer = document.getElementById("toast-container");
+  const helpBtn = document.getElementById("help-btn");
+  const helpModal = document.getElementById("help-modal");
+  const closeHelp = document.getElementById("close-help");
+  const newGameBtn = document.getElementById("new-game-btn");
+  const soundBtn = document.getElementById("sound-btn");
+  const endModal = document.getElementById("end-modal");
+  const closeEnd = document.getElementById("close-end");
+  const endTitle = document.getElementById("end-title");
+  const endMessage = document.getElementById("end-message");
+  const playAgainBtn = document.getElementById("play-again-btn");
+  const timerEl = document.getElementById("timer");
+  const hintBtn = document.getElementById("hint-btn");
+  const giveupBtn = document.getElementById("giveup-btn");
+  const hintBox = document.getElementById("hint-box");
+  const hintText = document.getElementById("hint-text");
+  const closeHintBtn = document.getElementById("close-hint");
+  const giveupModal = document.getElementById("giveup-modal");
+  const closeGiveupBtn = document.getElementById("close-giveup");
+  const confirmGiveupBtn = document.getElementById("confirm-giveup-btn");
+  const cancelGiveupBtn = document.getElementById("cancel-giveup-btn");
+  const endDefinitionBox = document.getElementById("end-definition");
+  const definitionWordEl = document.getElementById("definition-word");
+  const definitionTextEl = document.getElementById("definition-text");
+  const definitionExampleEl = document.getElementById("definition-example");
+  const definitionRelatedEl = document.getElementById("definition-related");
 
-  const AudioEngine = (() => {
-    let ctx = null;
-    let musicGain = null;
-    let sfxGain = null;
-    let schedulerId = null;
-    let nextNoteTime = 0;
-    let melodyIndex = 0;
-    let muted = false;
-    let intensity = 0; // 0 = chill start-of-run, 1 = fully thrilling
+  const validWords = new Set(WORDS);
 
-    // Chill: a soft, pleasant major arpeggio to open each run.
-    // Thrill: a tenser minor riff the music sneaks toward as intensity rises,
-    // so players don't hear the challenge ramp coming.
-    const CHILL_MELODY = [523.25, 659.25, 783.99, 659.25, 587.33, 698.46, 880.0, 698.46];
-    const THRILL_MELODY = [440.0, 659.25, 523.25, 659.25, 440.0, 698.46, 523.25, 587.33];
-    const BASS_NOTE = 110.0;
-    const MAX_MUSIC_GAIN = 0.6;
+  // --- Dictionary lookups (for hints & the educational word recap) ---
+  // Primary source: Wiktionary's REST API (Wikimedia infrastructure, CORS-enabled).
+  // Fallback source: Datamuse, used when a word has no Wiktionary entry.
+  const definitionCache = new Map();
+  const relatedCache = new Map();
 
-    let musicVolume = 0.27;
-    const SFX_VOLUME = 0.35;
-
-    function ensureContext() {
-      try {
-        if (!ctx) {
-          const AudioCtx = window.AudioContext || window.webkitAudioContext;
-          if (!AudioCtx) return null;
-          ctx = new AudioCtx();
-          musicGain = ctx.createGain();
-          musicGain.gain.value = muted ? 0 : musicVolume;
-          musicGain.connect(ctx.destination);
-          sfxGain = ctx.createGain();
-          sfxGain.gain.value = muted ? 0 : SFX_VOLUME;
-          sfxGain.connect(ctx.destination);
-
-          // iOS/Safari only fully unlocks audio after a real sound plays inside
-          // the gesture handler that created the context — a silent blip does it.
-          const unlockBuffer = ctx.createBuffer(1, 1, 22050);
-          const unlockSource = ctx.createBufferSource();
-          unlockSource.buffer = unlockBuffer;
-          unlockSource.connect(ctx.destination);
-          unlockSource.start(0);
-        }
-        // Safari/iOS WebKit adds a state beyond the spec's suspended/running/
-        // closed: "interrupted" (e.g. after a call, Siri, or another app
-        // taking the audio session). resume() is what recovers from it too,
-        // but a check for only "suspended" misses it and gets stuck forever.
-        if (ctx.state !== 'running' && ctx.state !== 'closed') {
-          ctx.resume().catch(() => {});
-        }
-        return ctx;
-      } catch (err) {
-        console.error('AudioEngine: failed to init/resume AudioContext', err);
-        return ctx;
-      }
-    }
-
-    // Mobile browsers often suspend (or, on WebKit, "interrupt") the
-    // AudioContext when the tab/app is backgrounded; resume it once the
-    // player comes back.
-    function resumeIfNeeded() {
-      if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {});
-    }
-
-    // True once the AudioContext exists and is actually running — iOS/Safari
-    // create it in a "suspended" state until a real gesture resumes it.
-    function isUnlocked() {
-      return !!ctx && ctx.state === 'running';
-    }
-
-    function playTone({ freqStart, freqEnd, duration, type = 'sine', gainStart = 0.3, delay = 0 }) {
-      if (!ensureContext()) return;
-      const t0 = ctx.currentTime + delay;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(freqStart, t0);
-      if (freqEnd !== undefined) {
-        osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 1), t0 + duration);
-      }
-      gain.gain.setValueAtTime(gainStart, t0);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
-      osc.connect(gain);
-      gain.connect(sfxGain);
-      osc.start(t0);
-      osc.stop(t0 + duration + 0.02);
-    }
-
-    function playFlap() {
-      playTone({ freqStart: 520, freqEnd: 880, duration: 0.12, type: 'square', gainStart: 0.22 });
-    }
-
-    // Two different game-over stingers, picked at random for variety.
-    function playGameOverSwoop() {
-      playTone({ freqStart: 420, freqEnd: 120, duration: 0.5, type: 'sawtooth', gainStart: 0.28 });
-      playTone({ freqStart: 200, freqEnd: 55, duration: 0.4, type: 'square', gainStart: 0.18, delay: 0.15 });
-    }
-
-    function playGameOverTumble() {
-      const notes = [660, 550, 440, 330];
-      notes.forEach((freq, i) => {
-        playTone({ freqStart: freq, freqEnd: freq * 0.85, duration: 0.14, type: 'square', gainStart: 0.22, delay: i * 0.09 });
-      });
-      playTone({ freqStart: 150, freqEnd: 45, duration: 0.35, type: 'sawtooth', gainStart: 0.2, delay: notes.length * 0.09 });
-    }
-
-    function playGameOver() {
-      (Math.random() < 0.5 ? playGameOverSwoop : playGameOverTumble)();
-    }
-
-    function scheduleNote(freq, time, type, duration) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, time);
-      gain.gain.setValueAtTime(0.0001, time);
-      gain.gain.exponentialRampToValueAtTime(0.22, time + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + duration * 0.85);
-      osc.connect(gain);
-      gain.connect(musicGain);
-      osc.start(time);
-      osc.stop(time + duration);
-    }
-
-    function scheduleBass(time, gainAmount, duration) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(BASS_NOTE, time);
-      gain.gain.setValueAtTime(0.0001, time);
-      gain.gain.exponentialRampToValueAtTime(gainAmount, time + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + duration * 1.7);
-      osc.connect(gain);
-      gain.connect(musicGain);
-      osc.start(time);
-      osc.stop(time + duration * 1.8);
-    }
-
-    function musicTick() {
-      // Backgrounded tabs throttle setInterval (heavily on mobile); without this,
-      // returning to the game would try to schedule a big backlog of catch-up notes.
-      if (nextNoteTime < ctx.currentTime) {
-        nextNoteTime = ctx.currentTime;
-      }
-      while (nextNoteTime < ctx.currentTime + 0.2) {
-        const thrilling = intensity >= 0.5;
-        const melody = thrilling ? THRILL_MELODY : CHILL_MELODY;
-        const leadType = thrilling ? 'square' : 'triangle';
-        const noteDuration = 0.34 - intensity * 0.13; // 0.34 (chill) -> 0.21 (thrilling)
-        const bassGain = intensity * 0.3; // fades in as the run gets harder
-
-        scheduleNote(melody[melodyIndex % melody.length], nextNoteTime, leadType, noteDuration);
-        if (bassGain > 0.015 && melodyIndex % 2 === 0) {
-          scheduleBass(nextNoteTime, bassGain, noteDuration);
-        }
-        melodyIndex++;
-        nextNoteTime += noteDuration;
-      }
-    }
-
-    function startMusic() {
-      if (!ensureContext() || schedulerId) return;
-      const now = ctx.currentTime;
-      musicGain.gain.cancelScheduledValues(now);
-      musicGain.gain.setValueAtTime(muted ? 0 : musicVolume, now);
-      nextNoteTime = now + 0.1;
-      melodyIndex = 0;
-      musicTick();
-      schedulerId = setInterval(musicTick, 100);
-    }
-
-    // Stops scheduling new notes and fades the tail out quickly so it doesn't click.
-    function stopMusic() {
-      if (schedulerId) {
-        clearInterval(schedulerId);
-        schedulerId = null;
-      }
-      if (ctx && musicGain) {
-        const now = ctx.currentTime;
-        musicGain.gain.cancelScheduledValues(now);
-        musicGain.gain.setValueAtTime(musicGain.gain.value, now);
-        musicGain.gain.linearRampToValueAtTime(0.0001, now + 0.12);
-      }
-    }
-
-    function setIntensity(value) {
-      intensity = Math.max(0, Math.min(1, value));
-    }
-
-    function setMusicVolumePercent(percent) {
-      musicVolume = (Math.max(0, Math.min(100, percent)) / 100) * MAX_MUSIC_GAIN;
-      if (musicGain && !muted && !schedulerId) {
-        // Not currently playing (or mid fade-out) — just stage the level for next start.
-        musicGain.gain.value = musicVolume;
-      } else if (musicGain && !muted) {
-        musicGain.gain.setValueAtTime(musicVolume, ctx.currentTime);
-      }
-    }
-
-    function setMuted(value) {
-      muted = value;
-      if (musicGain) musicGain.gain.value = muted ? 0 : musicVolume;
-      if (sfxGain) sfxGain.gain.value = muted ? 0 : SFX_VOLUME;
-    }
-
-    function toggleMuted() {
-      setMuted(!muted);
-      return muted;
-    }
-
-    return {
-      playFlap,
-      playGameOver,
-      startMusic,
-      stopMusic,
-      setIntensity,
-      setMusicVolumePercent,
-      toggleMuted,
-      resumeIfNeeded,
-      isMuted: () => muted,
-      // Exposed so the very first tap anywhere on the page can create/resume
-      // the AudioContext immediately, before any game-ready gating applies.
-      unlock: ensureContext,
-      isUnlocked,
-    };
-  })();
-
-  function loadImage(src) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error(`Failed to load ${src}`));
-      img.src = src;
-    });
+  function stripHtml(html) {
+    return html
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<sup[\s\S]*?<\/sup>/gi, "")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
-  const assets = {};
-  let ready = false;
+  async function fetchWithTimeout(url, ms) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), ms);
+    try {
+      return await fetch(url, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
 
-  Promise.all([
-    loadImage('images/background.png').then((img) => (assets.background = img)),
-    loadImage('images/bird1up.png').then((img) => (assets.birdUp = img)),
-    loadImage('images/bird1down.png').then((img) => (assets.birdDown = img)),
-    ...CAT_DEFS.map((def) => loadImage(`images/${def.key}.png`).then((img) => (def.img = img))),
-  ]).then(() => {
-    assets.cats = CAT_DEFS;
-    ready = true;
-    message.textContent = 'Tap, click, or press Space to flap';
-    resetGame();
-    requestAnimationFrame(loop);
+  async function fetchDefinition(word) {
+    const key = word.toUpperCase();
+    if (definitionCache.has(key)) return definitionCache.get(key);
+    try {
+      const res = await fetchWithTimeout(
+        `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(
+          word.toLowerCase()
+        )}`,
+        4000
+      );
+      if (!res.ok) throw new Error("not found");
+      const data = await res.json();
+      const entries = data.en || [];
+
+      // Wiktionary groups senses by etymology/part-of-speech, not by how
+      // common they are, so the very first entry can be an obscure or
+      // archaic sense (e.g. "robot" once meant serf labour). The entry with
+      // the most catalogued senses is a decent proxy for "the primary,
+      // well-documented meaning" of the word.
+      let bestEntryDefs = [];
+      let bestEntryPos = "";
+      for (const entry of entries) {
+        const defs = (entry.definitions || [])
+          .map((defObj) => ({
+            text: stripHtml(defObj.definition || ""),
+            example:
+              defObj.examples && defObj.examples[0]
+                ? stripHtml(defObj.examples[0])
+                : "",
+          }))
+          .filter((d) => d.text);
+        if (defs.length > bestEntryDefs.length) {
+          bestEntryDefs = defs;
+          bestEntryPos = (entry.partOfSpeech || "").toLowerCase();
+        }
+      }
+
+      // Within that entry, a sense with a citation example is more likely
+      // to be the headline meaning than one without.
+      const best =
+        bestEntryDefs.find((d) => d.example) || bestEntryDefs[0];
+      if (!best) throw new Error("no definition");
+      const result = {
+        partOfSpeech: bestEntryPos,
+        definition: best.text,
+        example: best.example,
+      };
+      definitionCache.set(key, result);
+      return result;
+    } catch (e) {
+      definitionCache.set(key, null);
+      return null;
+    }
+  }
+
+  async function fetchRelatedWords(word) {
+    const key = word.toUpperCase();
+    if (relatedCache.has(key)) return relatedCache.get(key);
+    try {
+      const res = await fetchWithTimeout(
+        `https://api.datamuse.com/words?ml=${encodeURIComponent(
+          word.toLowerCase()
+        )}&max=6`,
+        4000
+      );
+      if (!res.ok) throw new Error("request failed");
+      const data = await res.json();
+      const words = data
+        .map((d) => d.word)
+        .filter((w) => w.toLowerCase() !== word.toLowerCase())
+        .slice(0, 5);
+      relatedCache.set(key, words);
+      return words;
+    } catch (e) {
+      relatedCache.set(key, []);
+      return [];
+    }
+  }
+
+  function maskWord(text, word) {
+    const re = new RegExp(word, "gi");
+    return text.replace(re, "•".repeat(word.length));
+  }
+
+  // --- Timer ---
+  let timerInterval = null;
+  let startTime = null;
+  let elapsedSeconds = 0;
+
+  function formatTime(totalSeconds) {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return String(mins).padStart(2, "0") + ":" + String(secs).padStart(2, "0");
+  }
+
+  function tickTimer() {
+    elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+    timerEl.textContent = formatTime(elapsedSeconds);
+  }
+
+  function startTimer() {
+    stopTimer();
+    startTime = Date.now();
+    elapsedSeconds = 0;
+    timerEl.textContent = "00:00";
+    timerInterval = setInterval(tickTimer, 1000);
+  }
+
+  function stopTimer() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+  }
+
+  // --- Sound ---
+  let soundOn = localStorage.getItem("wordleLandSound") !== "off";
+  let audioCtx = null;
+
+  function getAudioContext() {
+    if (!audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new Ctx();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  }
+
+  function playTone(freq, duration, type, volume, delay) {
+    if (!soundOn) return;
+    const ctx = getAudioContext();
+    const start = ctx.currentTime + (delay || 0);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type || "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(volume || 0.15, start);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + duration + 0.02);
+  }
+
+  function playKeySound() {
+    playTone(480, 0.05, "sine", 0.12);
+  }
+
+  function playBackspaceSound() {
+    playTone(320, 0.05, "sine", 0.1);
+  }
+
+  function playInvalidSound() {
+    playTone(180, 0.16, "sawtooth", 0.15);
+    playTone(140, 0.2, "sawtooth", 0.12, 0.09);
+  }
+
+  function playWinSound() {
+    [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) =>
+      playTone(freq, 0.28, "triangle", 0.18, i * 0.12)
+    );
+  }
+
+  function playLoseSound() {
+    [392, 349.23, 293.66].forEach((freq, i) =>
+      playTone(freq, 0.32, "sine", 0.14, i * 0.16)
+    );
+  }
+
+  function updateSoundBtn() {
+    soundBtn.textContent = soundOn ? "🔊" : "🔇";
+  }
+
+  soundBtn.addEventListener("click", () => {
+    soundOn = !soundOn;
+    localStorage.setItem("wordleLandSound", soundOn ? "on" : "off");
+    updateSoundBtn();
+    if (soundOn) playKeySound();
   });
 
-  let bird, pipes, score, best, lastTime, pipeTimer, state, popStart;
+  updateSoundBtn();
 
-  best = Number(localStorage.getItem('prettyBirdBest') || 0);
+  // --- Confetti ---
+  const CONFETTI_COLORS = ["#e91e8c", "#ff6fb0", "#ffc94d", "#ffd6e8", "#ff4f9a"];
 
-  function resetGame() {
-    bird = {
-      x: W * 0.28,
-      y: H / 2,
-      vy: 0,
-      radius: 15,
-      rotation: 0,
-    };
-    pipes = [];
-    score = 0;
-    pipeTimer = 0;
-    state = 'ready';
-    popStart = -Infinity;
-    scoreEl.textContent = '0';
-    AudioEngine.setIntensity(0);
-  }
-
-  function flap() {
-    if (!ready) return;
-    if (state === 'ready') {
-      state = 'playing';
-      overlay.classList.add('hidden');
-      AudioEngine.startMusic();
-    }
-    if (state === 'playing') {
-      bird.vy = FLAP_VELOCITY;
-      popStart = performance.now();
-      AudioEngine.playFlap();
-    } else if (state === 'over') {
-      resetGame();
+  function launchConfetti() {
+    const count = 60;
+    for (let i = 0; i < count; i++) {
+      const piece = document.createElement("div");
+      piece.className = "confetti";
+      const size = 6 + Math.random() * 6;
+      piece.style.left = Math.random() * 100 + "vw";
+      piece.style.width = size + "px";
+      piece.style.height = size * 1.6 + "px";
+      piece.style.background =
+        CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
+      const duration = 2.2 + Math.random() * 1.8;
+      const delay = Math.random() * 0.3;
+      piece.style.animationDuration = duration + "s";
+      piece.style.animationDelay = delay + "s";
+      document.body.appendChild(piece);
+      setTimeout(() => piece.remove(), (duration + delay) * 1000 + 200);
     }
   }
 
-  function pickTwoDistinctCats() {
-    const firstIndex = Math.floor(Math.random() * assets.cats.length);
-    let secondIndex = Math.floor(Math.random() * (assets.cats.length - 1));
-    if (secondIndex >= firstIndex) secondIndex++;
-    return [assets.cats[firstIndex], assets.cats[secondIndex]];
+  let secret = "";
+  let currentRow = 0;
+  let currentGuess = "";
+  let gameOver = false;
+  let hintUsed = false;
+  let rowsEls = [];
+  let keyEls = {};
+
+  function pickSecret() {
+    return ANSWERS[Math.floor(Math.random() * ANSWERS.length)];
   }
 
-  // Difficulty ramps up steadily as the score climbs, rather than staying flat.
-  function getDifficultyLevel() {
-    return Math.floor(score / DIFFICULTY_SCORE_STEP);
-  }
-
-  function currentPipeSpeed() {
-    return Math.min(MAX_PIPE_SPEED, BASE_PIPE_SPEED + getDifficultyLevel() * SPEED_PER_LEVEL);
-  }
-
-  function currentPipeGap() {
-    return Math.max(MIN_PIPE_GAP, BASE_PIPE_GAP - getDifficultyLevel() * GAP_PER_LEVEL);
-  }
-
-  function currentPipeInterval() {
-    return Math.max(MIN_PIPE_INTERVAL, BASE_PIPE_INTERVAL - getDifficultyLevel() * INTERVAL_PER_LEVEL);
-  }
-
-  function currentMovingChance() {
-    return Math.min(MAX_MOVING_CHANCE, BASE_MOVING_CHANCE + getDifficultyLevel() * CHANCE_PER_LEVEL);
-  }
-
-  function buildSteps() {
-    const stepCount = STEP_COUNT_MIN + Math.floor(Math.random() * (STEP_COUNT_MAX - STEP_COUNT_MIN + 1));
-    const zoneRange = STEP_ZONE_START_X - STEP_ZONE_END_X;
-    const segmentWidth = zoneRange / stepCount;
-    const steps = [];
-    for (let i = 0; i < stepCount; i++) {
-      const segmentEnd = STEP_ZONE_START_X - (i + 1) * segmentWidth;
-      const x = segmentEnd + Math.random() * segmentWidth;
-      const magnitude = STEP_OFFSET_MIN + Math.random() * (STEP_OFFSET_MAX - STEP_OFFSET_MIN);
-      steps.push({ x, offset: Math.random() < 0.5 ? magnitude : -magnitude });
+  function buildBoard() {
+    boardEl.innerHTML = "";
+    rowsEls = [];
+    for (let r = 0; r < MAX_GUESSES; r++) {
+      const row = document.createElement("div");
+      row.className = "board-row";
+      const tiles = [];
+      for (let c = 0; c < WORD_LENGTH; c++) {
+        const tile = document.createElement("div");
+        tile.className = "tile";
+        row.appendChild(tile);
+        tiles.push(tile);
+      }
+      boardEl.appendChild(row);
+      rowsEls.push(tiles);
     }
-    return steps;
   }
 
-  function spawnPipe() {
-    const margin = 60;
-    const gap = currentPipeGap();
-    const availableHeight = H - GROUND_HEIGHT - gap - margin * 2;
-    const topHeight = margin + Math.random() * availableHeight;
-    const [topCat, bottomCat] = pickTwoDistinctCats();
-    const moving = Math.random() < currentMovingChance();
-    pipes.push({
-      x: W + PIPE_WIDTH,
-      topHeight,
-      bottomY: topHeight + gap,
-      passed: false,
-      topCat,
-      bottomCat,
-      gap,
-      moving,
-      minTop: margin,
-      maxTop: margin + availableHeight,
-      // A handful of last-second jumps, not a continuous bob — catches the player off guard.
-      steps: moving ? buildSteps() : [],
-      nextStepIndex: 0,
+  function buildKeyboard() {
+    keyboardEl.innerHTML = "";
+    keyEls = {};
+    KEYBOARD_ROWS.forEach((rowKeys) => {
+      const row = document.createElement("div");
+      row.className = "keyboard-row";
+      rowKeys.forEach((k) => {
+        const btn = document.createElement("button");
+        btn.className = "key";
+        if (k === "ENTER" || k === "BACK") btn.classList.add("wide");
+        btn.textContent = k === "BACK" ? "⌫" : k === "ENTER" ? "Enter" : k;
+        btn.dataset.key = k;
+        btn.addEventListener("click", () => handleKey(k));
+        row.appendChild(btn);
+        if (k !== "ENTER" && k !== "BACK") keyEls[k] = btn;
+      });
+      keyboardEl.appendChild(row);
     });
   }
 
-  function rectCircleCollide(cx, cy, r, rx, ry, rw, rh) {
-    const closestX = Math.max(rx, Math.min(cx, rx + rw));
-    const closestY = Math.max(ry, Math.min(cy, ry + rh));
-    const dx = cx - closestX;
-    const dy = cy - closestY;
-    return dx * dx + dy * dy < r * r;
+  function showToast(msg) {
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.textContent = msg;
+    toastContainer.appendChild(toast);
+    setTimeout(() => toast.remove(), 1600);
   }
 
-  function update(dt) {
-    if (state !== 'playing') return;
+  function shakeRow() {
+    const row = boardEl.children[currentRow];
+    row.classList.add("shake");
+    setTimeout(() => row.classList.remove("shake"), 500);
+  }
 
-    bird.vy += GRAVITY * dt;
-    bird.y += bird.vy * dt;
-    bird.rotation = Math.max(-0.5, Math.min(1.2, bird.vy / 600));
-
-    pipeTimer += dt * 1000;
-    if (pipeTimer >= currentPipeInterval()) {
-      pipeTimer = 0;
-      spawnPipe();
+  function updateTiles() {
+    const tiles = rowsEls[currentRow];
+    for (let i = 0; i < WORD_LENGTH; i++) {
+      const letter = currentGuess[i];
+      tiles[i].textContent = letter || "";
+      tiles[i].classList.toggle("filled", !!letter);
     }
+  }
 
-    const pipeSpeed = currentPipeSpeed();
-    for (const pipe of pipes) {
-      pipe.x -= pipeSpeed * dt;
+  function evaluateGuess(guess) {
+    const result = new Array(WORD_LENGTH).fill("absent");
+    const secretLetters = secret.split("");
+    const used = new Array(WORD_LENGTH).fill(false);
 
-      while (pipe.nextStepIndex < pipe.steps.length && pipe.x <= pipe.steps[pipe.nextStepIndex].x) {
-        const step = pipe.steps[pipe.nextStepIndex];
-        pipe.topHeight = Math.min(pipe.maxTop, Math.max(pipe.minTop, pipe.topHeight + step.offset));
-        pipe.bottomY = pipe.topHeight + pipe.gap;
-        pipe.nextStepIndex++;
-      }
-
-      if (!pipe.passed && pipe.x + PIPE_WIDTH < bird.x - bird.radius) {
-        pipe.passed = true;
-        score++;
-        scoreEl.textContent = String(score);
-        AudioEngine.setIntensity(score / CHILL_TO_THRILL_SCORE);
-      }
-
-      if (
-        rectCircleCollide(bird.x, bird.y, bird.radius, pipe.x, 0, PIPE_WIDTH, pipe.topHeight) ||
-        rectCircleCollide(bird.x, bird.y, bird.radius, pipe.x, pipe.bottomY, PIPE_WIDTH, H - GROUND_HEIGHT - pipe.bottomY)
-      ) {
-        gameOver();
+    for (let i = 0; i < WORD_LENGTH; i++) {
+      if (guess[i] === secretLetters[i]) {
+        result[i] = "correct";
+        used[i] = true;
       }
     }
 
-    while (pipes.length && pipes[0].x + PIPE_WIDTH < 0) {
-      pipes.shift();
+    for (let i = 0; i < WORD_LENGTH; i++) {
+      if (result[i] === "correct") continue;
+      const idx = secretLetters.findIndex(
+        (ch, j) => ch === guess[i] && !used[j]
+      );
+      if (idx !== -1) {
+        result[i] = "present";
+        used[idx] = true;
+      }
     }
 
-    if (bird.y + bird.radius >= H - GROUND_HEIGHT) {
-      bird.y = H - GROUND_HEIGHT - bird.radius;
-      gameOver();
-    }
-    if (bird.y - bird.radius <= 0) {
-      bird.y = bird.radius;
-      bird.vy = 0;
-    }
+    return result;
   }
 
-  function gameOver() {
-    if (state !== 'playing') return;
-    state = 'over';
-    AudioEngine.stopMusic();
-    AudioEngine.playGameOver();
-    if (score > best) {
-      best = score;
-      localStorage.setItem('prettyBirdBest', String(best));
-    }
-    title.textContent = 'Game Over';
-    message.textContent = 'Tap, click, or press Space to try again';
-    scoreDisplay.textContent = `Score: ${score}   Best: ${best}`;
-    overlay.classList.remove('hidden');
-  }
+  const KEY_PRIORITY = { absent: 0, present: 1, correct: 2 };
 
-  function drawBackground() {
-    if (assets.background) {
-      ctx.drawImage(assets.background, 0, 0, W, H);
-    }
-  }
-
-  function updateClouds(dt) {
-    for (const cloud of CLOUDS) {
-      cloud.x -= cloud.speed * dt;
-      const wrapMargin = 80 * cloud.scale;
-      if (cloud.x < -wrapMargin) {
-        cloud.x = W + wrapMargin;
+  function updateKeyboardColors(guess, result) {
+    for (let i = 0; i < WORD_LENGTH; i++) {
+      const letter = guess[i];
+      const keyEl = keyEls[letter];
+      if (!keyEl) continue;
+      const current = keyEl.dataset.state || "";
+      const currentRank = KEY_PRIORITY[current] ?? -1;
+      const newRank = KEY_PRIORITY[result[i]];
+      if (newRank > currentRank) {
+        keyEl.classList.remove("correct", "present", "absent");
+        keyEl.classList.add(result[i]);
+        keyEl.dataset.state = result[i];
       }
     }
   }
 
-  function drawCloudShape(x, y, scale) {
-    ctx.beginPath();
-    ctx.ellipse(x, y, 30 * scale, 16 * scale, 0, 0, Math.PI * 2);
-    ctx.ellipse(x + 22 * scale, y + 6 * scale, 22 * scale, 14 * scale, 0, 0, Math.PI * 2);
-    ctx.ellipse(x - 22 * scale, y + 6 * scale, 22 * scale, 14 * scale, 0, 0, Math.PI * 2);
-    ctx.fill();
+  function revealRow(guess, result, onDone) {
+    const tiles = rowsEls[currentRow];
+    result.forEach((state, i) => {
+      setTimeout(() => {
+        tiles[i].classList.add("flip");
+        setTimeout(() => {
+          tiles[i].classList.add(state);
+        }, 250);
+        if (i === WORD_LENGTH - 1) {
+          setTimeout(onDone, 300);
+        }
+      }, i * 250);
+    });
   }
 
-  function drawClouds() {
-    ctx.save();
-    ctx.globalAlpha = 0.4;
-    ctx.fillStyle = '#ffffff';
-    for (const cloud of CLOUDS) {
-      drawCloudShape(cloud.x, cloud.y, cloud.scale);
-    }
-    ctx.restore();
+  function revealGiveUpRow(onDone) {
+    const tiles = rowsEls[currentRow];
+    const letters = secret.split("");
+    letters.forEach((letter, i) => {
+      tiles[i].textContent = letter;
+      tiles[i].classList.add("filled");
+      setTimeout(() => {
+        tiles[i].classList.add("flip");
+        setTimeout(() => {
+          tiles[i].classList.add("revealed");
+        }, 250);
+        if (i === WORD_LENGTH - 1) {
+          setTimeout(onDone, 300);
+        }
+      }, i * 250);
+    });
   }
 
-  function drawEye(cat, eye, eyeX, eyeY) {
-    // Cover the sprite's fixed painted pupil with the sclera color, then draw
-    // a fresh pupil offset toward the bird so the cat appears to watch it.
-    ctx.beginPath();
-    ctx.fillStyle = cat.sclera;
-    ctx.arc(eyeX, eyeY, eye.r * 0.62, 0, Math.PI * 2);
-    ctx.fill();
+  async function showEndDefinition(word) {
+    endDefinitionBox.classList.remove("hidden");
+    definitionWordEl.textContent = word;
+    definitionTextEl.textContent = "Looking up something interesting…";
+    definitionExampleEl.classList.add("hidden");
+    definitionRelatedEl.classList.add("hidden");
 
-    const dx = bird.x - eyeX;
-    const dy = bird.y - eyeY;
-    const dist = Math.hypot(dx, dy) || 1;
-    const pupilRadius = Math.max(1.3, eye.r * 0.42);
-    const travel = Math.max(eye.r - pupilRadius - 0.6, 0.6);
-    const offX = (dx / dist) * travel;
-    const offY = (dy / dist) * travel;
+    const [info, related] = await Promise.all([
+      fetchDefinition(word),
+      fetchRelatedWords(word),
+    ]);
 
-    ctx.beginPath();
-    ctx.fillStyle = '#201208';
-    ctx.arc(eyeX + offX, eyeY + offY, pupilRadius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  function drawPipe(pipe) {
-    // Bottom obstacle: cat stands upright, face near the gap, feet flush with the ground.
-    const bottomHeight = H - GROUND_HEIGHT - pipe.bottomY;
-    if (pipe.bottomCat) {
-      const cat = pipe.bottomCat;
-      const img = cat.img;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(pipe.x, pipe.bottomY, PIPE_WIDTH, bottomHeight);
-      ctx.clip();
-      ctx.drawImage(img, pipe.x, pipe.bottomY, PIPE_WIDTH, img.height);
-      drawEye(cat, cat.eyeL, pipe.x + cat.eyeL.x, pipe.bottomY + cat.eyeL.y);
-      drawEye(cat, cat.eyeR, pipe.x + cat.eyeR.x, pipe.bottomY + cat.eyeR.y);
-      ctx.restore();
-    }
-
-    // Top obstacle: a different cat hangs upside-down, face near the gap.
-    if (pipe.topCat) {
-      const cat = pipe.topCat;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
-      ctx.clip();
-      ctx.translate(pipe.x, pipe.topHeight);
-      ctx.scale(1, -1);
-      ctx.drawImage(cat.img, 0, 0, PIPE_WIDTH, cat.img.height);
-      ctx.restore();
-
-      // Eyes are drawn after un-flipping so the pupils themselves stay upright.
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
-      ctx.clip();
-      drawEye(cat, cat.eyeL, pipe.x + cat.eyeL.x, pipe.topHeight - cat.eyeL.y);
-      drawEye(cat, cat.eyeR, pipe.x + cat.eyeR.x, pipe.topHeight - cat.eyeR.y);
-      ctx.restore();
-    }
-  }
-
-  function drawBird() {
-    const frame = Math.floor(performance.now() / FLAP_FRAME_MS) % 2 === 0 ? assets.birdUp : assets.birdDown;
-    if (!frame) return;
-
-    const popElapsed = performance.now() - popStart;
-    let scale = 1;
-    if (popElapsed >= 0 && popElapsed < POP_DURATION) {
-      const t = popElapsed / POP_DURATION;
-      const decay = (1 - t) * (1 - t);
-      scale = 1 + (POP_SCALE - 1) * decay;
-    }
-
-    ctx.save();
-    ctx.translate(bird.x, bird.y);
-    ctx.rotate(bird.rotation);
-    ctx.scale(scale, scale);
-    ctx.drawImage(frame, -BIRD_WIDTH / 2, -BIRD_HEIGHT / 2, BIRD_WIDTH, BIRD_HEIGHT);
-    ctx.restore();
-  }
-
-  function draw() {
-    drawBackground();
-    drawClouds();
-    for (const pipe of pipes) drawPipe(pipe);
-    drawBird();
-  }
-
-  function loop(timestamp) {
-    if (!lastTime) lastTime = timestamp;
-    const dt = Math.min((timestamp - lastTime) / 1000, 1 / 30);
-    lastTime = timestamp;
-
-    updateClouds(dt);
-    update(dt);
-    draw();
-
-    requestAnimationFrame(loop);
-  }
-
-  function handleInput(e) {
-    if (e.type === 'keydown' && e.code !== 'Space') return;
-    e.preventDefault();
-    flap();
-  }
-
-  const MOBILE_QUERY = window.matchMedia('(max-width: 768px)');
-
-  // On mobile, scale #game-container (in real px, not just CSS max-width) so
-  // it covers the entire viewport at the game's native 480:640 ratio —
-  // cropping whichever axis overflows rather than leaving letterbox bars or
-  // stretching the canvas out of proportion. Desktop keeps the CSS-driven
-  // centered card and gets its inline sizing cleared.
-  function fitGameContainer() {
-    if (!MOBILE_QUERY.matches) {
-      gameContainer.style.width = '';
-      gameContainer.style.height = '';
+    if (info && info.definition) {
+      const pos = info.partOfSpeech ? `(${info.partOfSpeech}) ` : "";
+      definitionTextEl.textContent = pos + info.definition;
+      if (info.example) {
+        definitionExampleEl.textContent = `“${info.example}”`;
+        definitionExampleEl.classList.remove("hidden");
+      }
+    } else if (related.length) {
+      definitionTextEl.textContent = `Here are some words related to ${word.toLowerCase()}:`;
+    } else {
+      endDefinitionBox.classList.add("hidden");
       return;
     }
-    const viewportWidth = window.visualViewport ? window.visualViewport.width : window.innerWidth;
-    const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-    const scale = Math.max(viewportWidth / W, viewportHeight / H);
-    gameContainer.style.width = `${W * scale}px`;
-    gameContainer.style.height = `${H * scale}px`;
-  }
 
-  fitGameContainer();
-  window.addEventListener('resize', fitGameContainer);
-  window.addEventListener('orientationchange', fitGameContainer);
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', fitGameContainer);
-  }
-
-  window.addEventListener('keydown', handleInput);
-  canvas.addEventListener('mousedown', flap);
-  canvas.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    flap();
-  }, { passive: false });
-  startBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    flap();
-  });
-  muteBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const muted = AudioEngine.toggleMuted();
-    muteBtn.textContent = muted ? '🔇' : '🔊';
-  });
-  AudioEngine.setMusicVolumePercent(Number(musicVolumeSlider.value));
-  musicVolumeSlider.addEventListener('input', (e) => {
-    AudioEngine.setMusicVolumePercent(Number(e.target.value));
-  });
-
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) AudioEngine.resumeIfNeeded();
-  });
-
-  // iOS/Safari only unlocks Web Audio inside a genuine user gesture, and the
-  // very first tap can arrive before assets finish loading (when flap() is
-  // still a no-op). This listens for that literal first tap/click/key press
-  // anywhere on the page — independent of game state — creates and resumes
-  // the AudioContext right then, and keeps retrying on each gesture until
-  // the context reports "running" (some iOS versions resolve resume()
-  // asynchronously, so one tap isn't always guaranteed to finish the job).
-  const UNLOCK_EVENTS = ['touchstart', 'touchend', 'pointerdown', 'mousedown', 'click', 'keydown'];
-  function unlockAudioOnGesture() {
-    AudioEngine.unlock();
-    if (AudioEngine.isUnlocked()) {
-      UNLOCK_EVENTS.forEach((type) => document.removeEventListener(type, unlockAudioOnGesture));
+    if (related.length) {
+      definitionRelatedEl.innerHTML =
+        "<strong>Related words:</strong> " + related.join(", ");
+      definitionRelatedEl.classList.remove("hidden");
     }
   }
-  UNLOCK_EVENTS.forEach((type) => document.addEventListener(type, unlockAudioOnGesture, { passive: true }));
 
-  title.textContent = 'Pretty Bird';
-  message.textContent = 'Loading...';
-  scoreDisplay.textContent = best ? `Best: ${best}` : '';
+  function lockRoundControls() {
+    hintBtn.disabled = true;
+    giveupBtn.disabled = true;
+  }
+
+  function endGame(won) {
+    gameOver = true;
+    stopTimer();
+    lockRoundControls();
+    hideHintBox();
+    const finalTime = formatTime(elapsedSeconds);
+    setTimeout(() => {
+      if (won) {
+        rowsEls[currentRow].forEach((tile, i) => {
+          setTimeout(() => tile.classList.add("win-bounce"), i * 80);
+        });
+        playWinSound();
+        launchConfetti();
+        const guesses = currentRow + 1;
+        endTitle.textContent = "You Win! 🌸";
+        endMessage.textContent = `You guessed the word in ${guesses} ${
+          guesses === 1 ? "try" : "tries"
+        } and ${finalTime}!`;
+      } else {
+        playLoseSound();
+        endTitle.textContent = "So Close!";
+        endMessage.textContent = `The word was ${secret}. Time: ${finalTime}. Better luck next time!`;
+      }
+      endModal.classList.remove("hidden");
+      showEndDefinition(secret);
+    }, won ? 600 : 300);
+  }
+
+  function giveUp() {
+    if (gameOver) return;
+    giveupModal.classList.add("hidden");
+    gameOver = true;
+    stopTimer();
+    lockRoundControls();
+    hideHintBox();
+    const finalTime = formatTime(elapsedSeconds);
+    playLoseSound();
+    revealGiveUpRow(() => {
+      endTitle.textContent = "Gave Up";
+      endMessage.textContent = `The word was ${secret}. Time: ${finalTime}. Here's something to learn from it!`;
+      endModal.classList.remove("hidden");
+      showEndDefinition(secret);
+    });
+  }
+
+  // --- Hint ---
+  function showHintBox(text) {
+    hintText.textContent = text;
+    hintBox.classList.remove("hidden");
+  }
+
+  function hideHintBox() {
+    hintBox.classList.add("hidden");
+  }
+
+  async function handleHint() {
+    if (gameOver || hintUsed) return;
+    hintUsed = true;
+    hintBtn.disabled = true;
+    showHintBox("Thinking of a clue…");
+
+    const info = await fetchDefinition(secret);
+    if (info && info.definition) {
+      const pos = info.partOfSpeech ? `(${info.partOfSpeech}) ` : "";
+      showHintBox(`💡 ${pos}${maskWord(info.definition, secret)}`);
+      return;
+    }
+
+    const related = await fetchRelatedWords(secret);
+    if (related.length) {
+      showHintBox(`💡 Think of words related to: ${maskWord(related.join(", "), secret)}`);
+      return;
+    }
+
+    showHintBox("💡 No clue available right now — trust your instincts!");
+  }
+
+  function submitGuess() {
+    if (currentGuess.length !== WORD_LENGTH) {
+      shakeRow();
+      playInvalidSound();
+      showToast("Not enough letters");
+      return;
+    }
+    if (!validWords.has(currentGuess)) {
+      shakeRow();
+      playInvalidSound();
+      showToast("Not in word list");
+      return;
+    }
+
+    const guess = currentGuess;
+    const result = evaluateGuess(guess);
+
+    revealRow(guess, result, () => {
+      updateKeyboardColors(guess, result);
+      const won = guess === secret;
+      if (won) {
+        endGame(true);
+      } else if (currentRow === MAX_GUESSES - 1) {
+        endGame(false);
+      } else {
+        currentRow++;
+        currentGuess = "";
+      }
+    });
+  }
+
+  function handleKey(k) {
+    if (gameOver) return;
+    if (k === "ENTER") {
+      submitGuess();
+    } else if (k === "BACK") {
+      currentGuess = currentGuess.slice(0, -1);
+      updateTiles();
+      playBackspaceSound();
+    } else if (/^[A-Z]$/.test(k)) {
+      if (currentGuess.length < WORD_LENGTH) {
+        currentGuess += k;
+        updateTiles();
+        playKeySound();
+      }
+    }
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (
+      !helpModal.classList.contains("hidden") ||
+      !endModal.classList.contains("hidden") ||
+      !giveupModal.classList.contains("hidden")
+    ) {
+      return;
+    }
+    const key = e.key.toUpperCase();
+    if (key === "ENTER") handleKey("ENTER");
+    else if (key === "BACKSPACE") handleKey("BACK");
+    else if (/^[A-Z]$/.test(key)) handleKey(key);
+  });
+
+  helpBtn.addEventListener("click", () => helpModal.classList.remove("hidden"));
+  closeHelp.addEventListener("click", () => helpModal.classList.add("hidden"));
+  helpModal.addEventListener("click", (e) => {
+    if (e.target === helpModal) helpModal.classList.add("hidden");
+  });
+
+  closeEnd.addEventListener("click", () => endModal.classList.add("hidden"));
+  endModal.addEventListener("click", (e) => {
+    if (e.target === endModal) endModal.classList.add("hidden");
+  });
+
+  hintBtn.addEventListener("click", handleHint);
+  closeHintBtn.addEventListener("click", hideHintBox);
+
+  giveupBtn.addEventListener("click", () => {
+    if (gameOver) return;
+    giveupModal.classList.remove("hidden");
+  });
+  closeGiveupBtn.addEventListener("click", () => giveupModal.classList.add("hidden"));
+  cancelGiveupBtn.addEventListener("click", () => giveupModal.classList.add("hidden"));
+  confirmGiveupBtn.addEventListener("click", giveUp);
+  giveupModal.addEventListener("click", (e) => {
+    if (e.target === giveupModal) giveupModal.classList.add("hidden");
+  });
+
+  function newGame() {
+    secret = pickSecret();
+    currentRow = 0;
+    currentGuess = "";
+    gameOver = false;
+    hintUsed = false;
+    endModal.classList.add("hidden");
+    giveupModal.classList.add("hidden");
+    endDefinitionBox.classList.add("hidden");
+    hideHintBox();
+    hintBtn.disabled = false;
+    giveupBtn.disabled = false;
+    buildBoard();
+    buildKeyboard();
+    startTimer();
+  }
+
+  newGameBtn.addEventListener("click", newGame);
+  playAgainBtn.addEventListener("click", newGame);
+
+  newGame();
 })();
